@@ -9,12 +9,8 @@
 #include <pthread.h>
 
 //SP-alg: que
-#include <sys/queue.h>
-//#include "queue.h"
-//SP-alg
-//#include <vector>//C++
 #include <stdbool.h>
-#include <limits.h>// int max
+#include <math.h>// ceil
 
 //enable & disable
 #include <string.h>
@@ -22,29 +18,76 @@
 #include <math.h>//time calculate
 
 
-int *d;
-int *parent;
 
+	
 typedef struct EdgeInfo
 {
-	int a, b, dis, da;
-	bool vb;
+	int a, b, dis;//, da, db, num;
+	
+	union pthread_mutex_t * mutex; 
 } EIn;
 
+typedef struct ptReturn
+{
+	int b, db, parent;
+} PRet;
 
-
-void *b_part(void *edge) {
-	//long* data = static_cast <long*> threadId;
-	//printf("Hello World! It's me, thread #%ld!\n", *data);
-	EIn data ;
-	//memcpy(&data,(EIn*)edge,sizeof(EIn));
-	data =  *(EIn*)edge;
-	if (!data.vb && data.dis != 0 && data.da + data.dis < d[data.b])
-	{
-		d[data.b] = data.da + data.dis;
-		parent[data.b] = data.a;
-	}
+typedef struct Qnode
+{
+	int id;
+	struct Qnode* next;
+	//next = (Dqn *)malloc(sizeof(Dqn));
 	
+} Dqn;
+
+Dqn *last;
+bool *inque;
+int *d, *parent;
+int vert_num;
+//union 
+pthread_mutex_t mutex; 
+
+Dqn* newNode(int id, Dqn* ends) {
+  Dqn *new;      
+  new = (Dqn *)malloc(sizeof(Dqn));
+  new->id = id;    
+  new->next = ends;   
+  return new;
+}
+
+void *b_part(void *edge2) {
+	EIn edges ;
+	int newdist_j;
+	//PRet *bpreturn;
+	Dqn *node;
+	//bpreturn = (PRet* ) malloc(sizeof(PRet));
+	//bpreturn->b = -1;
+	//bpreturn->db = -1;
+	//bpreturn->parent = -1;
+	//memcpy(&data,(EIn*)edge,sizeof(EIn));
+	edges =  *(EIn*)edge2;
+	if (edges.b < vert_num && edges.b != edges.a && edges.dis != 0 ) { /* if an edge */
+		newdist_j = d[edges.a] + edges.dis;
+		
+		printf("[%d]newdist :%d\n", edges.b,  newdist_j);
+		pthread_mutex_lock(&mutex); // enter critical section 
+		if (newdist_j < d[edges.b] && !inque[edges.b]) {
+			d[edges.b] = newdist_j;
+			parent[edges.b] = edges.a;
+			//printf("enque :%d\n", edges.b );
+			node = newNode(edges.b, last->next);
+			last->next = node;
+			last = node;
+			inque[edges.b] = true;
+			
+			
+			//bpreturn->b = edges.b;
+			//bpreturn->db = newdist_j;
+			//bpreturn->parent = edges.a;
+		}
+		pthread_mutex_unlock(&mutex); // leave critical section
+		
+	}
 	pthread_exit(NULL);
 }
 
@@ -57,10 +100,13 @@ int main(int argc, char *argv[])
 	int thread_num = atoi(argv[1]);
 	int source_id = atoi(argv[4]) - 1;//when read, id - 1
 	FILE *fpin, *fpout;
-	int vert_num = 0;
+	//int vert_num = 0;
 	int edge_num = 0;
 	int i, j, k;
 	pthread_t threads[thread_num];
+	//union pthread_mutex_t * mutex; 
+	//mutex = (pthread_mutex_t *)malloc( sizeof(pthread_mutex_t) );
+	pthread_mutex_init (&mutex, NULL);
 	
 	//read the input
 	fpin = fopen(argv[2], "r");
@@ -74,16 +120,24 @@ int main(int argc, char *argv[])
 	int * weight;
 	//memset( weight, 0, vert_num*vert_num*sizeof(int) );
 	weight = (int *)calloc( vert_num * vert_num, sizeof(int));
-	
+	//to pthread
 	EIn edges;
+	
+	
 	//edges = (EIn *)malloc(sizeof(int) * 3 * edge_num);
+	
+	//printf("read time\n");
 	//read edges
 	for(i = 0; i < edge_num; i++){
 		fscanf(fpin,"%d",&edges.a);
 		fscanf(fpin,"%d",&edges.b);
 		fscanf(fpin,"%d",&edges.dis);
+		
+		
+		//dijkstra matrix
 		weight[(edges.a - 1)* vert_num + edges.b - 1] = edges.dis;//when read, id - 1
 		weight[(edges.b - 1)* vert_num + edges.a - 1] = edges.dis;//when read, id - 1
+		
 		/*
 		etmp1.b = edges.b - 1;//when read, id - 1
 		etmp1.w = edges.dis;  //when read, id - 1
@@ -100,78 +154,85 @@ int main(int argc, char *argv[])
 	
 	//printf("sp time\n");
 	//queue
-	queue qbps;
+	//Dqn *node, *head, end;
+	Dqn *head, end;
+	//PRet *ret;
 	int newdist_j;
-	qbps.push(source_id);
-
-	while (!qbps.empty){ /* while a vertex */
-		i = qbps.pop();
-		for (j = 0; j < vert_num; j++) { /* get next edge */
-			edges.b = j ;
-			edges.dis = weight[a* vert_num + edges.b];
-			if (w[i* vert_num +j] != 0) { /* if an edge */
-				newdist_j = d[i] + edges.dis;
-				if (newdist_j < d[j]) {
-					dist[j] = newdist_j;
-					qbps.push(j); /* enqueue vertex if not there */
-				}
-			}
-		}
-	}
+	//ret = (PRet *)malloc(sizeof(PRet) * 1);
 	
-	//dijkstra
-	/*
+	inque = (bool *)malloc(sizeof(bool) * vert_num);
+	for ( i = 0; i < vert_num; i++) inque[i] = false;
 	d = (int *)malloc(sizeof(int) * vert_num);
 	parent = (int *)malloc(sizeof(int) * vert_num);
-	bool visit[vert_num];
-	for ( i = 0; i < vert_num; i++) {
-		visit[i] = false;
-		d[i] = 1e9;//1e9 INT_MAX
-	}
- 
+	for ( i = 0; i < vert_num; i++) d[i] = 1e9;//1e9 INT_MAX
 	d[source_id] = 0;
 	parent[source_id] = source_id;
- 
 	
-	//printf("sp for, source_id = %d\n", source_id);
-	int a, min, w;
-	//int iter = (int) vert_num/thread_num;
-	for ( k = 0; k < vert_num; k++)// worst case: #v = # iter
-	{
-		a = -1;
-		min = 1e9;
-		//printf("sp a part\n");
-		for ( i = 0; i < vert_num; i++){
-			//printf("sp  i = %d, d[i] = %d\n", i, d[i]);
-			if (!visit[i] && d[i] < min)
-			{
-				a = i;
-				min = d[i];
-				//printf("sp cool! a = %d\n",a);
+	end.id = -1;
+	end.next = &end;
+	int iter;
+	iter = (int) ceil((double)vert_num / thread_num);
+	//printf("iter :%d, thread_num: %d, vert_num: %d, vert_num / thread_num: %f\n", iter, thread_num, vert_num, (double)vert_num / thread_num);
+	
+	
+	//que.push
+	head = newNode(source_id, &end);
+	last = head;
+	//printf("head->id :%d\n, source_id:%d\n", head->id, source_id);
+
+	EIn *edgess;//[thread_num];
+	edgess = (EIn *)malloc( thread_num * sizeof(EIn) );
+	
+	printf("sp while\n");
+	inque[source_id] = true;
+	//edges.num = vert_num;
+	//edges.mutex = mutex;
+	do{ /* while a vertex */
+		//edges.a = head->id;
+		//edges.da = d[edges.a];
+		printf("now :%d\n", head->id);
+		for(i = 0; i < iter; i++){
+			for (j = 0; j < thread_num; j++) { /* get next edge */
+				edgess[j].a = head->id;
+				edgess[j].b = j + i * thread_num;
+				//if(edges.b >= vert_num)
+				//	break;
+				if(edgess[j].b < vert_num)
+					edgess[j].dis = weight[edgess[j].a* vert_num + edgess[j].b];
+				//if(edges.dis == 0)
+				//	continue;
+				//printf("do edges :%d\n", edgess[j].b );
+				//edges.db = d[edges.b];
+				pthread_create(&threads[j], NULL, b_part, (void *)&edgess[j]);
 			}
+			for (j = 0; j < thread_num; j++) {
+				pthread_join(threads[j], NULL);
+				//printf("join :%d\n", j);
+				
+			}
+			//que.push(j); /* enqueue vertex if not there */
+			/*
+			for (j = 0; j < thread_num; j++) {
+				pthread_join (threads[j],(void **) &ret);
+				if(ret->b!=-1 && !inque[ret->b]){
+					printf("enque :%d\n", ret->b);
+					node = newNode(ret[j].b, &end);
+					last->next = node;
+					last = node;
+					inque[ret[j].b] = true;
+				}
+			}
+			*/
 		}
-		if (a == -1) break;
-		visit[a] = true;
-		edges.a = a;
-		for ( i = 0; i < vert_num; i++)
-		{
-			edges.b = i ;
-			edges.dis = weight[a* vert_num + edges.b];
-			edges.da = d[a];
-			edges.vb = visit[edges.b];
-
-			//printf("before pthread_create\n");
-			pthread_create(&threads[i%thread_num], NULL, b_part, (void *)&edges);
-
-			//if(i == 0)
-			//for (j = 0; j < thread_num; j++) pthread_join(threads[j], NULL);
-		}
-	}
-	*/
+		//printf("que.pop\n");
+		//que.pop
+		inque[head->id] = false;
+		head = head->next;
+	}while (head->id != -1);
 	
-	
-	pthread_exit(NULL);
 	free((void *)weight);
+	free((void *)d);
+	free((void *)edgess);
 	
 	printf("write time\n");
 	//write
@@ -200,9 +261,10 @@ int main(int argc, char *argv[])
 	
 	
 	//free((void *)edges);
-	free((void *)d);
 	free((void *)parent);
 	free((void *)sp);
+	//pthread_mutex_destory(&mutex);
+	pthread_exit(NULL);
 	return 0;
 }
 
