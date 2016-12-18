@@ -40,6 +40,16 @@ void mpi_wait(int msec){
 	}
 	
 }
+void mpi_waitany_ranks(MPI_Request *request, int length){
+	int i, flag, flags, indx;
+	MPI_Status status;
+	flags = 0;
+	while(!flags){
+		MPI_Testany( length, request, &indx, &flag, &status);
+		MPI_Allreduce(&flag, &flags, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+	}
+	
+}
 
 int main(int argc, char *argv[])
 {
@@ -106,7 +116,8 @@ int main(int argc, char *argv[])
 		sscanf(inp_split,"%d %d %d", &edges.a, &edges.b, &edges.dis);
 		weight[(edges.a - 1)* vert_num + edges.b - 1] = edges.dis;//when read, id - 1
 		weight[(edges.b - 1)* vert_num + edges.a - 1] = edges.dis;//when read, id - 1
-		
+
+		//if(rank ==0) printf("%d %d %d", edges.a, edges.b, edges.dis);
         inp_split = strtok(NULL, "\n");
     }
 	
@@ -123,10 +134,12 @@ int main(int argc, char *argv[])
 	
 	//sp per vertex
 	int dist, newdist, flag, flags, linkc, newpar, parent;
-	int *dj;
+	int *dj, *pass_par;
 	dist = 1e9;
 	linkc = 0;
+	parent = -1;
 	dj = (int*)malloc(vert_num * sizeof(int));
+	pass_par = (int*)calloc(vert_num , sizeof(int));
 	bool have_ball, ball, clean_ball, self_clean;
 	//int have_ball, ball, clean_ball, self_clean;
 	have_ball = false;
@@ -139,6 +152,7 @@ int main(int argc, char *argv[])
 		dist = 0;
 		parent = source_id;
 		have_ball = true;
+		flag = 1;
 		for(i = 0; i < vert_num; i++){
 			if(myweight[i] != 0){
 				linkc++;
@@ -148,16 +162,19 @@ int main(int argc, char *argv[])
 		}
 	}
 	else{
+		flag = 0;
 		for(i = 0; i < vert_num; i++)
 			if(myweight[i] != 0) {
 				linkc++;
-				parent = i;
+				//parent = i;
 			}
 	}
 	
-	//dpr
-	MPI_Status status;
+
+
+	MPI_Status *status;
 	MPI_Request *request, req_dpr;
+	status = (MPI_Status *)malloc(linkc * sizeof(MPI_Status));
 	request = (MPI_Request *)malloc(linkc * sizeof(MPI_Request));
 	int mpi_r_flag;
 	
@@ -167,67 +184,79 @@ int main(int argc, char *argv[])
 	//MPI_Barrier(MPI_COMM_WORLD);
 	//printf("[%d]start sp loop\n", rank);
 	do{
+		//if(rank == 0) 
+			printf("[%d] in do while\n", rank);
 		//receive
 		for( i = 0; i < linkc; i++){
 			MPI_Irecv(&new_dist[i], 1, MPI_INT, MPI_ANY_SOURCE, 
 				data_tag, MPI_COMM_WORLD, &request[i]);
 		}
-		
-		/*
-		//dual-pass ring algorithm
-		{
-		if(have_ball){
-			if(rank == size - 1){
-				//send to root
-				MPI_Send(&ball, 1, MPI_C_BOOL, 0, dpr_tag, MPI_COMM_WORLD);
-			}
-			else{
-				//send to next
-				MPI_Send(&ball, 1, MPI_C_BOOL, rank + 1, dpr_tag, MPI_COMM_WORLD);
-			}
-			have_ball = false;
-		}
-		
-		MPI_Start(&req_dpr);
-		MPI_Irecv(&ball, 1, MPI_C_BOOL, MPI_ANY_SOURCE, 
-				dpr_tag, MPI_COMM_WORLD, &req_dpr);
-		if(req_dpr != MPI_REQUEST_NULL){
-			have_ball = true;
-			//judge the ball
-			if(rank == 0 && !ball){
-					flag = 1;
-				for(i = 1; i < size; i++)
-					MPI_Send(&flag, 1, MPI_INT, i, ter_tag, MPI_COMM_WORLD);
-				
-			}
-			else{
-				ball = ball | self_clean;
-				self_clean = white;
-			}
-		}
-		if(rank != 0 ){
-			MPI_Irecv(&flag, 1, MPI_INT, MPI_ANY_SOURCE, 
-					ter_tag, MPI_COMM_WORLD, &req_dpr);
-		}
-		MPI_Request_free( &req_dpr );
-		}
-		
-		*/
-		
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 		//MPI_Barrier(MPI_COMM_WORLD);
-		mpi_wait((int) (16000 / size + 1500));
-		//MPI_Waitany( linkc, request, &flag, &status);
+		//mpi_wait((int) (18000 / size + 5000));
+		mpi_wait((int) ( 8000));
+		//mpi_waitany_ranks(request, linkc);//after req was tested, there would be unkown nokorisimasu.
+		
+
+		
+
+
+
+		//printf("[%d]after Irecv\n", rank);
 		//deal receive to decise new dist
 		newdist = 1e9;
 		flag = 0;
 		for( i = 0; i < linkc; i++){
 			
-			MPI_Request_get_status( request[i], &mpi_r_flag, &status);
-			if(mpi_r_flag && new_dist[i] < newdist){
-				newdist = new_dist[i];
-				newpar = status.MPI_SOURCE;
-				printf("[%d]renew newdist: %d, newpar: %d\n"
-					, rank, newdist, newpar);
+			MPI_Request_get_status( request[i], &mpi_r_flag, &status[i]);
+			//printf("[%d]s[%d].MPI_SOURCE: %d\n"
+			//	, rank, i, status[i].MPI_SOURCE);
+			if(mpi_r_flag){
+				if( new_dist[i] < newdist){
+					newdist = new_dist[i];
+					newpar = status[i].MPI_SOURCE;
+					printf("[%d]renew newdist: %d, newpar: %d\n"
+						, rank, newdist, newpar);
+				}
+				pass_par[status[i].MPI_SOURCE] = 1;
 			}
 		}
 		if (newdist < dist){
@@ -236,22 +265,27 @@ int main(int argc, char *argv[])
 			printf("[%d]new dist: %d, parent: %d\n", rank, dist, parent);
 			flag = 1;
 			for (j = 0; j < vert_num; j++) /* get next edge */
-				if (myweight[j] != 0) {
+				if (myweight[j] != 0 && !pass_par[j]) {// if no resend it might loss
 					dj[j] = dist + myweight[j];
-					/*
-					if(j < rank)
-						self_clean = black;
-					*/
+
+
+
+
 					/* send distance to proc j */
+					//printf("[%d]send to : %d\n", rank, j);
 					MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
+					pass_par[j] = 0;
 				}
 		}
+		if(parent == -1)//if there is someone has no recv
+			flag = 1;
+		
 		
 		//Reduce flag
 		MPI_Allreduce(&flag, &flags, 1,
                MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-		flag = flags;
-	}while(flag != 0);
+		flag = flags;//it needs for blocking
+	}while(flags != 0);
 	free(request);
 	free((void *)myweight);
 	free((void *)new_dist);
