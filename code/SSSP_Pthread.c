@@ -56,10 +56,14 @@ Dqn* newNode(int id, Dqn* ends) {
 }
 
 void *b_part(void *edge2) {
+	//long* data = static_cast <long*> threadId;
+	//printf("Hello World! It's me, thread #%ld!\n", *data);
 	EIn edges ;
 	int newdist_j;
 	//PRet *bpreturn;
 	Dqn *node;
+	struct timespec sy11, sy12;
+	double sy1 = 0.0;
 	//bpreturn = (PRet* ) malloc(sizeof(PRet));
 	//bpreturn->b = -1;
 	//bpreturn->db = -1;
@@ -69,8 +73,10 @@ void *b_part(void *edge2) {
 	if (edges.b < vert_num && edges.b != edges.a && edges.dis != 0 ) { /* if an edge */
 		newdist_j = d[edges.a] + edges.dis;
 		
-		printf("[%d]newdist :%d\n", edges.b,  newdist_j);
+		clock_gettime(CLOCK_REALTIME, &sy11);
+		//printf("[%d]newdist :%d\n", edges.b,  newdist_j);
 		pthread_mutex_lock(&mutex); // enter critical section 
+		clock_gettime(CLOCK_REALTIME, &sy12);
 		if (newdist_j < d[edges.b] && !inque[edges.b]) {
 			d[edges.b] = newdist_j;
 			parent[edges.b] = edges.a;
@@ -86,16 +92,23 @@ void *b_part(void *edge2) {
 			//bpreturn->parent = edges.a;
 		}
 		pthread_mutex_unlock(&mutex); // leave critical section
-		
+		sy1 += sy12.tv_sec - sy11.tv_sec;
+		sy1 += (sy12.tv_nsec - sy11.tv_nsec) / 1000000000.0;
 	}
-	pthread_exit(NULL);
+	
+	pthread_exit(&sy1);
 }
 
 int main(int argc, char *argv[])
 {
 	//time measure
-	struct timespec tt1, tt2;
-	clock_gettime(CLOCK_REALTIME, &tt1);
+	struct timespec io11, io12, cp11, cp12;
+	double *sytmp;
+	double io1 = 0.0;
+	double cp1 = 0.0;
+	double sy1 = 0.0;
+	
+	clock_gettime(CLOCK_REALTIME, &io11);
 	
 	int thread_num = atoi(argv[1]);
 	int source_id = atoi(argv[4]) - 1;//when read, id - 1
@@ -149,15 +162,19 @@ int main(int argc, char *argv[])
 		*/
 	}
 	fclose(fpin);
+	clock_gettime(CLOCK_REALTIME, &io12);
+	io1 += io12.tv_sec - io11.tv_sec;
+	io1 += (io12.tv_nsec - io11.tv_nsec) / 1000000000.0;
 	
 	//shortest path
 	
 	//printf("sp time\n");
+	clock_gettime(CLOCK_REALTIME, &cp11);
 	//queue
 	//Dqn *node, *head, end;
 	Dqn *head, end;
 	//PRet *ret;
-	int newdist_j;
+	//int newdist_j;
 	//ret = (PRet *)malloc(sizeof(PRet) * 1);
 	
 	inque = (bool *)malloc(sizeof(bool) * vert_num);
@@ -172,7 +189,6 @@ int main(int argc, char *argv[])
 	end.next = &end;
 	int iter;
 	iter = (int) ceil((double)vert_num / thread_num);
-	//printf("iter :%d, thread_num: %d, vert_num: %d, vert_num / thread_num: %f\n", iter, thread_num, vert_num, (double)vert_num / thread_num);
 	
 	
 	//que.push
@@ -183,22 +199,22 @@ int main(int argc, char *argv[])
 	EIn *edgess;//[thread_num];
 	edgess = (EIn *)malloc( thread_num * sizeof(EIn) );
 	
-	printf("sp while\n");
+	//printf("sp while\n");
+	
 	inque[source_id] = true;
 	//edges.num = vert_num;
 	//edges.mutex = mutex;
 	do{ /* while a vertex */
 		//edges.a = head->id;
 		//edges.da = d[edges.a];
-		printf("now :%d\n", head->id);
+		//printf("now :%d\n", head->id);
 		for(i = 0; i < iter; i++){
 			for (j = 0; j < thread_num; j++) { /* get next edge */
 				edgess[j].a = head->id;
 				edgess[j].b = j + i * thread_num;
 				//if(edges.b >= vert_num)
 				//	break;
-				if(edgess[j].b < vert_num)
-					edgess[j].dis = weight[edgess[j].a* vert_num + edgess[j].b];
+				edgess[j].dis = weight[edgess[j].a* vert_num + edgess[j].b];
 				//if(edges.dis == 0)
 				//	continue;
 				//printf("do edges :%d\n", edgess[j].b );
@@ -206,7 +222,8 @@ int main(int argc, char *argv[])
 				pthread_create(&threads[j], NULL, b_part, (void *)&edgess[j]);
 			}
 			for (j = 0; j < thread_num; j++) {
-				pthread_join(threads[j], NULL);
+				pthread_join(threads[j], (void **) &sytmp);
+				sy1 += *sytmp;
 				//printf("join :%d\n", j);
 				
 			}
@@ -233,9 +250,13 @@ int main(int argc, char *argv[])
 	free((void *)weight);
 	free((void *)d);
 	free((void *)edgess);
+	clock_gettime(CLOCK_REALTIME, &cp12);
+	cp1 += io12.tv_sec - io11.tv_sec;
+	cp1 += (io12.tv_nsec - io11.tv_nsec) / 1000000000.0;
 	
 	printf("write time\n");
 	//write
+	clock_gettime(CLOCK_REALTIME, &io11);
 	int *sp;
 	//memset( sp, 0, vert_num*sizeof(int) );
 	sp = (int *)malloc(sizeof(int) * vert_num);
@@ -258,7 +279,11 @@ int main(int argc, char *argv[])
 		fprintf(fpout, "\n");
 	}
 	fclose(fpout);
+	clock_gettime(CLOCK_REALTIME, &io12);
+	io1 += io12.tv_sec - io11.tv_sec;
+	io1 += (io12.tv_nsec - io11.tv_nsec) / 1000000000.0;
 	
+	printf("io1 time: %3f\n cp1 time: %3f\n sy1 time: %3f\n", io1, cp1, sy1);
 	
 	//free((void *)edges);
 	free((void *)parent);
