@@ -41,7 +41,7 @@ void mpi_wait(int msec){
 	
 }
 void dual_pass_ring( int rank, int size, int *ball, bool *have_ball, 
-	int *flag, int *self_clean){
+	int *flag, int *self_clean, int iter_cnt, int *flagtmp){
 	int new_beh, left, right, i;
 	MPI_Request req_ter;
 	
@@ -72,52 +72,45 @@ void dual_pass_ring( int rank, int size, int *ball, bool *have_ball,
 		printf("[%d]got the ball,%d\n", rank, *ball );
 	}
 	
+	
 	//judge the ball
 	if(rank == 0 ){
 		if(*have_ball){
 			if(*ball == white){//ball is white
 				printf("Its time to terminate\n");
-				*flag = 0;
-
+				*flagtmp = 0;
 			}
 			else{
 				*ball = white;
 			}
 		}
 
-		//global termination
-		for(i = 1; i < size; i++){
-			MPI_Send(flag, 1, MPI_INT, i, ter_tag, MPI_COMM_WORLD);
-		}
 	}
 	else{
 		if(*have_ball){
 			*ball = *ball + *self_clean;
 			*self_clean = white;
 		}
-		//recv local termination
-		MPI_Recv(flag, 1, MPI_INT, 0, 
-				ter_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 		//MPI_Wait( &req_ter, MPI_STATUS_IGNORE);
 	}
 	
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	if(iter_cnt % size == 1){
+		if(rank == 0 ){
+			
+			//global termination
+			for(i = 1; i < size; i++){
+				MPI_Send(flagtmp, 1, MPI_INT, i, ter_tag, MPI_COMM_WORLD);
+			}
+			*flag = *flagtmp;
+		}
+		else{
+			//recv local termination
+			MPI_Recv(flag, 1, MPI_INT, 0, 
+					ter_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			//MPI_Wait( &req_ter, MPI_STATUS_IGNORE);
+		}
+	}
+	
 		
 }
 
@@ -140,16 +133,10 @@ int main(int argc, char *argv[])
 	//time measure
 	double tt1, tt2;
 	tt1 = MPI_Wtime();
-
-
-
-
-
 	
 	
 	
 	//printf("[%d]start read\n", rank);
-
     int error;
     MPI_File fh;
 	char *input;
@@ -167,13 +154,10 @@ int main(int argc, char *argv[])
 	if (error != MPI_SUCCESS)
         printf("[%d]ERROR: MPI_File_read\n", rank);
     MPI_File_close(&fh);
-
-
 	input[fsize] = '\0';
 	//printf("[%d]input: %s\n", rank, input);
 	
 	
-
 	//read the input
 	int vert_num = 0;
 	int edge_num = 0;
@@ -211,13 +195,13 @@ int main(int argc, char *argv[])
 	
 	
 	//sp per vertex
-	int dist, newdist, flag, flags, linkc, newpar, parent;
+	int dist, newdist, flag, flags, linkc, newpar, parent, count, flagtmp;
 	int *dj;
 	dist = 1e9;
 	linkc = 0;
 	newpar = -1;
 	parent = -1;
-
+	count = 0;
 	dj = (int*)malloc(vert_num * sizeof(int));
 	bool have_ball;
 	int ball, self_clean;
@@ -255,26 +239,20 @@ int main(int argc, char *argv[])
 		if ( myweight[j] != 0) {
 			dj[j] = dist + myweight[j];
 			/* send distance to proc j */
-
 			MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
-
-
 			//MPI_Irsend( &dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD, &req_ter);
 		}
 			
 	flag = 1;
-
 	do{
 		//printf("[%d]in sp loop\n", rank);
-
-
 		//receive
 		for( i = 0; i < linkc; i++){
 			MPI_Irecv(&new_dist[i], 1, MPI_INT, MPI_ANY_SOURCE, 
 				data_tag, MPI_COMM_WORLD, &request[i]);
 		}
+		count++;
 		
-
 		
 		
 		//printf("[%d]after dpr\n", rank);
@@ -297,10 +275,6 @@ int main(int argc, char *argv[])
 		}
 		*/
 		MPI_Waitall(linkc, request, status);
-
-
-
-
 		for( i = 0; i < linkc; i++){
 			
 			//MPI_Request_get_status( request[i], &mpi_r_flag, &status);
@@ -322,10 +296,7 @@ int main(int argc, char *argv[])
 		
 		
 		//dual-pass ring algorithm
-
-		dual_pass_ring( rank, size, &ball, &have_ball, &flag, &self_clean);
-
-
+		dual_pass_ring( rank, size, &ball, &have_ball, &flag, &self_clean, count, &flagtmp);
 		if(flag == 0)
 			printf("[%d]terminated!\n", rank);
 		else
@@ -333,10 +304,7 @@ int main(int argc, char *argv[])
 				if ( myweight[j] != 0) {
 					dj[j] = dist + myweight[j];
 					/* send distance to proc j */
-
 					MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
-
-
 					//MPI_Irsend( &dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD, &req_ter);
 					if(flags && j < rank)
 						self_clean = black;
@@ -346,14 +314,11 @@ int main(int argc, char *argv[])
 	free(request);
 	free((void *)myweight);
 	free((void *)new_dist);
-
-
 	// Synchronize sender & receiver
 	//MPI_Wait( &request, &status);
 	
 	//write
 	
-
 	//printf("[%d]write time\n", rank);
 	//gather parents
 	int *parents;
@@ -401,11 +366,7 @@ int main(int argc, char *argv[])
         printf("[%d]ERROR: MPI_File_write_all\n", rank);
     MPI_File_close(&fh);
 	
-
-
 	
-
-
 	
 	MPI_Finalize();
 	return 0;
