@@ -26,6 +26,7 @@
 #define black true
 
 
+
 typedef struct EdgeInfo
 {
 	int a, b, dis;
@@ -58,8 +59,13 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 	
 	//time measure
-	double tt1, tt2;
-	tt1 = MPI_Wtime();
+	double io11, io12, cp11, cp12;
+	double cm11, cm12, sy11, sy12;
+	double io1 = 0.0;
+	double cp1 = 0.0;
+	double cm1 = 0.0;
+	double sy1 = 0.0;
+	io11 = MPI_Wtime();
 	
 	
 	
@@ -119,43 +125,26 @@ int main(int argc, char *argv[])
 	}
 	free((void *)weight);
 	
+	io12 = MPI_Wtime();
+	io1 += io12 - io11;
+	
+	cp11 = MPI_Wtime();
+	
 	
 	
 	//sp per vertex
-	int dist, newdist, flag, flags, linkc, newpar, parent;
+	int dist, newdist, flag, flags, linkc, newpar, parent, count;
 	int *dj;
 	dist = 1e9;
 	linkc = 0;
 	parent = -1;
+	count = 0;
 	dj = (int*)malloc(vert_num * sizeof(int));
-
-
-
-
-
-
 	
 	//first: source send dist to neighber
 	if(rank == source_id){
 		dist = 0;
 		parent = source_id;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	}
 	
 	for(i = 0; i < vert_num; i++)
@@ -166,10 +155,10 @@ int main(int argc, char *argv[])
 	
 	//dpr
 	MPI_Status *status;
-	MPI_Request *request;
+	MPI_Request *request, req_dpr;
 	status = (MPI_Status *)malloc(linkc * sizeof(MPI_Status));
 	request = (MPI_Request *)malloc(linkc * sizeof(MPI_Request));
-	//int mpi_r_flag;
+	int mpi_r_flag;
 	
 	int * new_dist;
 	new_dist = (int*)calloc( linkc, sizeof(int));
@@ -179,26 +168,29 @@ int main(int argc, char *argv[])
 		if (myweight[j] != 0) {
 			dj[j] = dist + myweight[j];
 			/* send distance to proc j */
+			cm11 = MPI_Wtime();
 			MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
+			cm12 = MPI_Wtime();
+			cm1 +=  cm12 - cm11;
 		}
 	//MPI_Barrier(MPI_COMM_WORLD);
 	//printf("[%d]start sp loop\n", rank);
 	do{
+		cm11 = MPI_Wtime();
 		//receive
 		for( i = 0; i < linkc; i++){
 			MPI_Irecv(&new_dist[i], 1, MPI_INT, MPI_ANY_SOURCE, 
 				data_tag, MPI_COMM_WORLD, &request[i]);
 		}
+		MPI_Waitall(linkc, request, status);
+		cm12 = MPI_Wtime();
+		cm1 +=  cm12 - cm11;
+		count++;
 		
-
-		
-		//MPI_Barrier(MPI_COMM_WORLD);
-		//mpi_wait((int) (16000 / size + 1500));
-		//MPI_Waitany( linkc, request, &flag, &status);
-		//deal receive to decise new dist
 		newdist = 1e9;
 		flag = 0;
-		MPI_Waitall(linkc, request, status);
+		
+		//deal receive to decise new dist
 		for( i = 0; i < linkc; i++){
 			
 			//MPI_Request_get_status( request[i], &mpi_r_flag, &status);
@@ -220,22 +212,35 @@ int main(int argc, char *argv[])
 			if (myweight[j] != 0) {
 				dj[j] = dist + myweight[j];
 				/* send distance to proc j */
+				cm11 = MPI_Wtime();
 				MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
+				cm12 = MPI_Wtime();
+				cm1 +=  cm12 - cm11;
 			}
 		
+		sy11 = MPI_Wtime();
+		//MPI_Barrier(MPI_COMM_WORLD);
+		
+		
 		//Reduce flag
+		//cm11 = MPI_Wtime();
 		MPI_Allreduce(&flag, &flags, 1,
                MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+		sy12 = MPI_Wtime();
+		sy1 +=  sy12 - sy11;
+		//cm12 = MPI_Wtime();
+		//cm1 +=  cm12 - cm11;
 		flag = flags;
 	}while(flag != 0);
 	free(request);
 	free((void *)myweight);
 	free((void *)new_dist);
-	// Synchronize sender & receiver
-	//MPI_Wait( &request, &status);
+	cp12 = MPI_Wtime();
+	cp1 = cp12 - cp11;
 	
 	//write
 	
+	io11 = MPI_Wtime();
 	//printf("[%d]write time\n", rank);
 	//gather parents
 	int *parents;
@@ -282,7 +287,11 @@ int main(int argc, char *argv[])
 	if (error != MPI_SUCCESS)
         printf("[%d]ERROR: MPI_File_write_all\n", rank);
     MPI_File_close(&fh);
+	io12 = MPI_Wtime();
+	io1 += io12 - io11;
 	
+	printf("[%d]io1: %3f, cp1: %3f, cm1: %3f, sy1: %3f, linkc* count: %d\n"
+		, rank, io1, cp1, cm1, sy1, linkc* count);
 	
 	
 	MPI_Finalize();
