@@ -1,7 +1,7 @@
  /* 
    Sequential Mandelbrot set
  */
-// mpirun -n 2 ./SSSP_MPI_async 1 In_5_7 o_5_1 1
+// mpiexec -np 5 ./SSSP_MPI_async 1 In_5_7 o_5_1 1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,12 +131,16 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 	
 	//time measure
-	double tt1, tt2;
-	tt1 = MPI_Wtime();
+	double io11, io12, cp11, cp12;
+	double cm11, cm12;
+	double io1 = 0.0;
+	double cp1 = 0.0;
+	double cm1 = 0.0;
 	
 	
 	
 	//printf("[%d]start read\n", rank);
+	io11 = MPI_Wtime();
     int error;
     MPI_File fh;
 	char *input;
@@ -154,10 +158,13 @@ int main(int argc, char *argv[])
 	if (error != MPI_SUCCESS)
         printf("[%d]ERROR: MPI_File_read\n", rank);
     MPI_File_close(&fh);
+	io12 = MPI_Wtime();
+	io1 += io12 - io11;
 	input[fsize] = '\0';
 	//printf("[%d]input: %s\n", rank, input);
 	
 	
+	cp11 = MPI_Wtime();
 	//read the input
 	int vert_num = 0;
 	int edge_num = 0;
@@ -229,7 +236,7 @@ int main(int argc, char *argv[])
 	MPI_Request *request;
 	status = (MPI_Status *)malloc(linkc * sizeof(MPI_Status));
 	request = (MPI_Request *)malloc(linkc * sizeof(MPI_Request));
-	int mpi_r_flag;
+	//int mpi_r_flag;
 	
 	int * new_dist;
 	new_dist = (int*)calloc( linkc, sizeof(int));
@@ -239,20 +246,25 @@ int main(int argc, char *argv[])
 		if ( myweight[j] != 0) {
 			dj[j] = dist + myweight[j];
 			/* send distance to proc j */
+			cm11 = MPI_Wtime();
 			MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
+			cm12 = MPI_Wtime();
+			cm1 += cm12 - cm11;
 			//MPI_Irsend( &dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD, &req_ter);
 		}
 			
 	flag = 1;
+	flagtmp = 1;
 	do{
 		//printf("[%d]in sp loop\n", rank);
+		
+		cm11 = MPI_Wtime();
 		//receive
 		for( i = 0; i < linkc; i++){
 			MPI_Irecv(&new_dist[i], 1, MPI_INT, MPI_ANY_SOURCE, 
 				data_tag, MPI_COMM_WORLD, &request[i]);
 		}
 		count++;
-		
 		
 		
 		//printf("[%d]after dpr\n", rank);
@@ -262,19 +274,11 @@ int main(int argc, char *argv[])
 		//MPI_Waitany( linkc, request, &flag, &status);
 		//deal receive to decise new dist
 		newdist = 1e9;
-		/*
-		for( i = 0; i < linkc; i++){
-			
-			MPI_Request_get_status( request[i], &mpi_r_flag, &status[i]);
-			if(mpi_r_flag && new_dist[i] < newdist){
-				newdist = new_dist[i];
-				newpar = status[i].MPI_SOURCE;
-				//printf("[%d]renew newdist: %d, newpar: %d\n"
-				//	, rank, newdist, newpar);
-			}
-		}
-		*/
 		MPI_Waitall(linkc, request, status);
+		cm12 = MPI_Wtime();
+		cm1 += cm12 - cm11;
+		
+		
 		for( i = 0; i < linkc; i++){
 			
 			//MPI_Request_get_status( request[i], &mpi_r_flag, &status);
@@ -296,7 +300,10 @@ int main(int argc, char *argv[])
 		
 		
 		//dual-pass ring algorithm
+		cm11 = MPI_Wtime();
 		dual_pass_ring( rank, size, &ball, &have_ball, &flag, &self_clean, count, &flagtmp);
+		cm12 = MPI_Wtime();
+		cm1 += cm12 - cm11;
 		if(flag == 0)
 			printf("[%d]terminated!\n", rank);
 		else
@@ -304,7 +311,10 @@ int main(int argc, char *argv[])
 				if ( myweight[j] != 0) {
 					dj[j] = dist + myweight[j];
 					/* send distance to proc j */
+					cm11 = MPI_Wtime();
 					MPI_Send(&dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD);
+					cm12 = MPI_Wtime();
+					cm1 += cm12 - cm11;
 					//MPI_Irsend( &dj[j], 1, MPI_INT, j, data_tag, MPI_COMM_WORLD, &req_ter);
 					if(flags && j < rank)
 						self_clean = black;
@@ -314,11 +324,14 @@ int main(int argc, char *argv[])
 	free(request);
 	free((void *)myweight);
 	free((void *)new_dist);
+	cp12 = MPI_Wtime();
+	cp1 += cp12 - cp11;
 	// Synchronize sender & receiver
 	//MPI_Wait( &request, &status);
 	
 	//write
 	
+	io11 = MPI_Wtime();
 	//printf("[%d]write time\n", rank);
 	//gather parents
 	int *parents;
@@ -365,8 +378,11 @@ int main(int argc, char *argv[])
 	if (error != MPI_SUCCESS)
         printf("[%d]ERROR: MPI_File_write_all\n", rank);
     MPI_File_close(&fh);
+	io12 = MPI_Wtime();
+	io1 += io12 - io11;
 	
-	
+	printf("[%d]io1: %3f, cp1: %3f, cm1: %3f, linkc* count: %d\n"
+		, rank, io1, cp1, cm1, linkc* count);
 	
 	MPI_Finalize();
 	return 0;
